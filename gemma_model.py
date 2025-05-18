@@ -11,12 +11,32 @@ except Exception as e:
     print(f"Fatal: Error initializing GenAI client: {e}")
     client = None
 
-def generate_response(command):
+# Subjective: I've kept a sliding window to reduce token usage when interacting with the 
+# Google AI Studio API. If you're on a paid plan, you may increase this limit as needed.
+MAX_HISTORY_TURNS = 5
+
+def format_history_for_prompt(history):
+    if not history:
+        return ""
+    
+    formatted_history_parts = []
+    for i, (user_cmd, assistant_resp) in enumerate(history):
+        conversational_resp = assistant_resp
+        json_start = assistant_resp.find('{')
+        if json_start != -1:
+            pre_json_text = assistant_resp[:json_start].strip()
+            if pre_json_text:
+                conversational_resp = pre_json_text
+        formatted_history_parts.append(f"Previous User: {user_cmd}\nPrevious Assistant: {conversational_resp}")
+    return "\n\nConversation History (chronological, most recent is last):\n" + "\n\n".join(formatted_history_parts) + "\n\n---\n\nCurrent Interaction:"
+
+def generate_response(command, history=None):
     if not client:
         return {"raw_response": "GenAI client not initialized.", "error": "Client not initialized"}
-
+    history_prompt_segment = format_history_for_prompt(history or [])
     prompt = f"""You are a friendly and slightly jovial smart home assistant.
-    Given a command, determine if it's a smart home instruction or a general query.
+    {history_prompt_segment}
+    Given the current command (and considering the conversation history if provided), determine if it's a smart home instruction or a general query.
 
     If it's a smart home instruction:
     1. Provide a short, friendly, conversational acknowledgement.
@@ -24,7 +44,7 @@ def generate_response(command):
     Valid actions: turn_on, turn_off, lock, unlock, open, close.
     Valid rooms: living room, kitchen, bedroom, bathroom, office, main.
 
-    If it's a general query, provide a conversational answer with a warm and slightly jovial tone.
+    If it's a general query, provide a conversational answer with a warm and slightly jovial tone, considering the history for context.
     Format your entire response clearly for display in a terminal.
 
     Smart Home Examples:
@@ -45,7 +65,7 @@ def generate_response(command):
     Command: Tell me a fun fact.
     Response: Why certainly! Did you know that honey never spoils? How neat is that!
 
-    Command: {command}
+    Current Command: {command}
     Response:
     """
     try:
