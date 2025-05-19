@@ -133,7 +133,6 @@ if ws then
                                     local config_key = cmd.device:lower() .. "_" .. cmd.room:lower()
                                     local target_peripheral_id = peripheral_config[config_key]
                                     if target_peripheral_id then
-                                        print("Executing action '" .. cmd.action .. "' on peripheral ID " .. target_peripheral_id .. " for " .. cmd.device .. " (" .. cmd.room .. ").")
                                         rednet.send(target_peripheral_id, cmd.action)
                                     else
                                         print("Error: No peripheral configured for " .. cmd.device .. " (" .. cmd.room .. ") with key: '" .. config_key .. "'.")
@@ -141,9 +140,9 @@ if ws then
                                 else
                                     print("Invalid command in sequence: " .. textutils.serialize(cmd))
                                 end
-                            end
-                            if i < repeat_count and delay_ms > 0 then
-                                sleep(delay_ms / 1000)
+                                if delay_ms > 0 then
+                                    sleep(delay_ms / 1000)
+                                end
                             end
                         end
                     else
@@ -286,7 +285,6 @@ local function send_command_to_model(user_command)
                             local config_key = cmd.device:lower() .. "_" .. cmd.room:lower()
                             local target_peripheral_id = peripheral_config[config_key]
                             if target_peripheral_id then
-                                print("Executing action '" .. cmd.action .. "' on peripheral ID " .. target_peripheral_id .. " for " .. cmd.device .. " (" .. cmd.room .. ").")
                                 rednet.send(target_peripheral_id, cmd.action)
                             else
                                 print("Error: No peripheral configured for " .. cmd.device .. " (" .. cmd.room .. ") with key: '" .. config_key .. "'.")
@@ -294,9 +292,9 @@ local function send_command_to_model(user_command)
                         else
                             print("Invalid command in sequence: " .. textutils.serialize(cmd))
                         end
-                    end
-                    if i < repeat_count and delay_ms > 0 then
-                        sleep(delay_ms / 1000)
+                        if delay_ms > 0 then
+                            sleep(delay_ms / 1000)
+                        end
                     end
                 end
             elseif response_data.action_details.action and response_data.action_details.device and response_data.action_details.room then

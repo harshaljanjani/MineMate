@@ -35,17 +35,64 @@ def format_history_for_prompt(history):
         return ""
     return "\n\nConversation History (chronological, most recent is last):\n" + "\n\n".join(formatted_history_parts) + "\n\n---\n\nCurrent Interaction:"
 
+def load_peripheral_config(config_file_path="computercraft_scripts/peripheral_config.txt"):
+    peripheral_config = {}
+    if os.path.exists(config_file_path):
+        with open(config_file_path, 'r') as file:
+            print(f"Reading {config_file_path}...")
+            line_num = 0
+            parse_errors = 0
+            for line in file:
+                line_num += 1
+                line = line.strip()
+                if line and not line.startswith('#'):
+                    eq_pos = line.find('=')
+                    if eq_pos != -1:
+                        key = line[:eq_pos].strip()
+                        value_str = line[eq_pos + 1:].strip()
+                        value_num = None
+                        try:
+                            value_num = float(value_str)
+                        except ValueError:
+                            print(f"Error parsing line {line_num} in {config_file_path}: '{line}'. Invalid key or non-numeric value.")
+                            parse_errors += 1
+                        else:
+                            if key:
+                                peripheral_config[key] = value_num
+                            else:
+                                print(f"Error parsing line {line_num} in {config_file_path}: '{line}'. Empty key.")
+                                parse_errors += 1
+                    else:
+                        print(f"Error parsing line {line_num} in {config_file_path}: '{line}'. Expected 'key=value' format.")
+                        parse_errors += 1
+            file.close()
+            if parse_errors == 0 and line_num > 0:
+                print(f"Peripheral configuration loaded successfully from {config_file_path}.")
+            elif parse_errors > 0:
+                print(f"Found {parse_errors} error(s) while parsing {config_file_path}. Some configurations might be missing.")
+            else:
+                print(f"{config_file_path} was empty or only contained comments. Using empty config.")
+    else:
+        print(f"Warning: {config_file_path} not found. Peripheral control will be limited.")
+    return peripheral_config
+
 def generate_response(command, history=None):
     if not client:
         return {"raw_response": "GenAI client not initialized.", "error": "Client not initialized"}
     history_prompt_segment = format_history_for_prompt(history or [])
+    peripheral_config = load_peripheral_config()
+    available_configs = list(peripheral_config.keys())
     prompt = f"""You are a friendly and slightly jovial smart home assistant.
     {history_prompt_segment}
     Given the current command (and considering the conversation history if provided), determine if it's a smart home instruction or a general query.
 
+    Available device-room configurations (case-insensitive keys from peripheral_config.txt): {', '.join(available_configs)}
+
     If it's a smart home instruction:
     1. Provide a short, friendly, conversational acknowledgement.
-    2. On a NEW LINE, provide a JSON object with the following structure:
+    2. Infer the closest matching device-room configuration from the available_configs list based on the user's input (e.g., 'lights main' 
+    should match 'lights_main', 'light main' should also match 'lights_main' by understanding singular/plural variations).
+    3. On a NEW LINE, provide a JSON object with the following structure:
        {{
          "commands": [
            {{"action": "action_name", "device": "device_name", "room": "room_name"}},
@@ -56,8 +103,8 @@ def generate_response(command, history=None):
        }}
        - "commands": A list of one or more command objects.
        - "action": Valid actions: turn_on, turn_off, lock, unlock, open, close.
-       - "device": The name of the device (e.g., lights, door, fan).
-       - "room": Valid rooms: living room, kitchen, bedroom, bathroom, office, main.
+       - "device": The name of the device (e.g., lights, door, fan) derived from the matched configuration key (e.g., 'lights' from 'lights_main').
+       - "room": The room name derived from the matched configuration key (e.g., 'main' from 'lights_main').
        - "repeat": How many times the entire sequence in "commands" should be executed.
                    Use "infinite" for tasks that should run continuously until a new command is given (e.g., "flicker the lights").
                    If not specified or not applicable for a single, non-repeating task, default to 1.

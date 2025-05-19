@@ -1,1 +1,2 @@
-lights_kitchen=0
+lights_main=2
+fireworks_main=5
