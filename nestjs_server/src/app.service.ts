@@ -2,16 +2,27 @@ import { Injectable } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { CommandGateway } from './command.gateway';
-interface ActionDetails {
+
+interface CommandDetails {
   action: string;
   device: string;
   room: string;
 }
+
+interface SequenceDetails {
+  commands: CommandDetails[];
+  repeat: number | 'infinite';
+  delay_ms?: number;
+}
+
+type ActionDetails = CommandDetails | SequenceDetails;
+
 interface GemmaApiResponse {
   raw_response: string;
   action_details?: ActionDetails;
   error?: string;
 }
+
 const VALID_ROOMS = ['living room', 'kitchen', 'bedroom', 'bathroom', 'office', 'main'];
 const VALID_ACTIONS = ['turn_on', 'turn_off', 'lock', 'unlock', 'open', 'close'];
 
@@ -47,18 +58,66 @@ export class AppService {
         return gemmaData;
       }
 
+      let conversationalPart = gemmaData.raw_response;
+      const jsonStartIndex = conversationalPart.indexOf('{');
+      if (jsonStartIndex !== -1) {
+        conversationalPart = conversationalPart.substring(0, jsonStartIndex).trim();
+      }
+
       if (gemmaData.action_details) {
-        const { action, device, room } = gemmaData.action_details;
-        if (action && device && room) {
-          const lowerCaseRoom = room.toLowerCase();
-          if (VALID_ROOMS.includes(lowerCaseRoom) && VALID_ACTIONS.includes(action)) {
-            const commandString = `${action} ${device} ${room}`;
+        if ('commands' in gemmaData.action_details) {
+          const sequence = gemmaData.action_details as SequenceDetails;
+          if (Array.isArray(sequence.commands) && sequence.commands.length > 0 &&
+              (typeof sequence['repeat'] === 'number' || sequence['repeat'] === 'infinite')) {
+            let allCommandsValid = true;
+            for (const cmd of sequence.commands) {
+              if (!(cmd && typeof cmd.action === 'string' && typeof cmd.device === 'string' && typeof cmd.room === 'string' &&
+                    VALID_ACTIONS.includes(cmd.action) &&
+                    VALID_ROOMS.includes(cmd.room.toLowerCase()))) {
+                allCommandsValid = false;
+                console.warn(`Invalid command in sequence: ${JSON.stringify(cmd)}`);
+                break;
+              }
+            }
+            if (allCommandsValid) {
+              const normalizedCommands = sequence.commands.map(cmd => ({
+                ...cmd,
+                room: cmd.room.toLowerCase()
+              }));
+              const sequencePayload = {
+                commands: normalizedCommands,
+                repeat: sequence['repeat'],
+                delay_ms: sequence.delay_ms
+              };
+              if (conversationalPart && conversationalPart.trim() !== '') {
+                this.commandGateway.sendToAll('info', conversationalPart);
+              }
+              console.log(`Sending sequence_command to clients: ${JSON.stringify(sequencePayload)}`);
+              this.commandGateway.sendToAll('sequence_command', JSON.stringify(sequencePayload));
+              return gemmaData;
+            } else {
+              console.warn('Sequence identified but contained invalid command details. Treating as info.');
+            }
+          } else {
+            console.warn('Invalid sequence structure in action_details.');
+          }
+        } else if ('action' in gemmaData.action_details && 'device' in gemmaData.action_details && 'room' in gemmaData.action_details) {
+          const cmd = gemmaData.action_details as CommandDetails;
+          if (typeof cmd.action === 'string' && typeof cmd.device === 'string' && typeof cmd.room === 'string' &&
+              VALID_ACTIONS.includes(cmd.action) &&
+              VALID_ROOMS.includes(cmd.room.toLowerCase())) {
+            const commandString = `${cmd.action} ${cmd.device} ${cmd.room.toLowerCase()}`;
+            if (conversationalPart && conversationalPart.trim() !== '') {
+              this.commandGateway.sendToAll('info', conversationalPart);
+            }
             console.log(`Sending command to clients: "${commandString}"`);
             this.commandGateway.sendToAll('command', commandString);
             return gemmaData;
           } else {
-            console.warn(`Action identified but invalid room/action: Room="${room}", Action="${action}". Treating as info.`);
+            console.warn(`Invalid single command details: ${JSON.stringify(cmd)}`);
           }
+        } else {
+          console.warn('Unrecognized action_details structure.');
         }
       }
       console.log(`Sending info to clients: "${gemmaData.raw_response}"`);

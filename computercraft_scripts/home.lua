@@ -80,77 +80,105 @@ else
     print("WebSocket connection failed!")
     print("Error: " .. tostring(err))
 end
-    if ws then
-        ws.onMessage = function(payload_str, isBinary)
-            local old_x, old_y = term.getCursorPos()
-            term.setCursorPos(1, term.getCursorPos())
-            term.clearLine()
 
-            if isBinary then
-                print("Received binary WebSocket message, ignoring.")
+if ws then
+    ws.onMessage = function(payload_str, isBinary)
+        local old_x, old_y = term.getCursorPos()
+        term.setCursorPos(1, term.getCursorPos())
+        term.clearLine()
+
+        if isBinary then
+            print("Received binary WebSocket message, ignoring.")
+        else
+            print("Raw WebSocket payload: " .. payload_str)
+            local success, event_data = pcall(textutils.unserializeJSON, payload_str)
+
+            if not success or type(event_data) ~= "table" or type(event_data.type) ~= "string" or event_data.payload == nil then
+                print("Error: Malformed WebSocket message or failed to parse JSON: " .. (tostring(event_data) or "parse error"))
+                print("Original payload: " .. payload_str)
             else
-                print("Raw WebSocket payload: " .. payload_str)
-                local success, event_data = pcall(textutils.unserializeJSON, payload_str)
+                local event_type = event_data.type
+                local message_content = event_data.payload
 
-                if not success or type(event_data) ~= "table" or type(event_data.type) ~= "string" or event_data.payload == nil then
-                    print("Error: Malformed WebSocket message or failed to parse JSON: " .. (tostring(event_data) or "parse error"))
-                    print("Original payload: " .. payload_str)
-                else
-                    local event_type = event_data.type
-                    local message_content = event_data.payload
-
-                    if event_type == "command" then
-                        print("Received command to relay: " .. message_content)
-                        local parts = {}
-                        for part in message_content:gmatch("%S+") do
-                            table.insert(parts, part)
-                        end
-                        if #parts == 3 then
-                            local action, device, room_identifier = parts[1], parts[2], parts[3]
-                            local config_key = device:lower() .. "_" .. room_identifier:lower()
-                            local target_peripheral_id = peripheral_config[config_key]
-                            if target_peripheral_id then
-                                print("Relaying action '" .. action .. "' to peripheral ID " .. target_peripheral_id .. " for " .. device .. " (" .. room_identifier .. ").")
-                                local rednet_ok, rednet_err_msg = rednet.send(target_peripheral_id, action)
-                                if not rednet_ok then
-                                    print("Failed to send rednet message: " .. (rednet_err_msg or "unknown error"))
-                                end
-                            else
-                                print("Error: No peripheral configured for " .. device .. " (" .. room_identifier .. ") with key: '" .. config_key .. "'.")
+                if event_type == "command" then
+                    print("Received command to relay: " .. message_content)
+                    local parts = {}
+                    for part in message_content:gmatch("%S+") do
+                        table.insert(parts, part)
+                    end
+                    if #parts == 3 then
+                        local action, device, room_identifier = parts[1], parts[2], parts[3]
+                        local config_key = device:lower() .. "_" .. room_identifier:lower()
+                        local target_peripheral_id = peripheral_config[config_key]
+                        if target_peripheral_id then
+                            print("Relaying action '" .. action .. "' to peripheral ID " .. target_peripheral_id .. " for " .. device .. " (" .. room_identifier .. ").")
+                            local rednet_ok, rednet_err_msg = rednet.send(target_peripheral_id, action)
+                            if not rednet_ok then
+                                print("Failed to send rednet message: " .. (rednet_err_msg or "unknown error"))
                             end
                         else
-                            print("Invalid command format from server: " .. message_content)
+                            print("Error: No peripheral configured for " .. device .. " (" .. room_identifier .. ") with key: '" .. config_key .. "'.")
                         end
-                    elseif event_type == "info" then
-                        print("Info from Server: " .. message_content)
                     else
-                        print("Unknown WebSocket event type received: " .. event_type)
+                        print("Invalid command format from server: " .. message_content)
                     end
+                elseif event_type == "sequence_command" then
+                    local sequence_data = textutils.unserializeJSON(message_content)
+                    if type(sequence_data) == "table" and type(sequence_data.commands) == "table" and (type(sequence_data["repeat"]) == "number" or sequence_data["repeat"] == "infinite") then
+                        local repeat_count = sequence_data["repeat"] == "infinite" and 1000 or sequence_data["repeat"]
+                        local delay_ms = sequence_data.delay_ms or 0
+                        for i = 1, repeat_count do
+                            for _, cmd in ipairs(sequence_data.commands) do
+                                if type(cmd) == "table" and cmd.action and cmd.device and cmd.room then
+                                    local config_key = cmd.device:lower() .. "_" .. cmd.room:lower()
+                                    local target_peripheral_id = peripheral_config[config_key]
+                                    if target_peripheral_id then
+                                        print("Executing action '" .. cmd.action .. "' on peripheral ID " .. target_peripheral_id .. " for " .. cmd.device .. " (" .. cmd.room .. ").")
+                                        rednet.send(target_peripheral_id, cmd.action)
+                                    else
+                                        print("Error: No peripheral configured for " .. cmd.device .. " (" .. cmd.room .. ") with key: '" .. config_key .. "'.")
+                                    end
+                                else
+                                    print("Invalid command in sequence: " .. textutils.serialize(cmd))
+                                end
+                            end
+                            if i < repeat_count and delay_ms > 0 then
+                                sleep(delay_ms / 1000)
+                            end
+                        end
+                    else
+                        print("Invalid sequence_command payload: " .. message_content)
+                    end
+                elseif event_type == "info" then
+                    print("Info from Server: " .. message_content)
+                else
+                    print("Unknown WebSocket event type received: " .. event_type)
                 end
             end
-            term.write("Type in your prompt! > ")
-            term.setCursorPos(old_x, old_y)
         end
+        term.write("Type in your prompt! > ")
+        term.setCursorPos(old_x, old_y)
+    end
 
-        ws.onClose = function(code, reason)
-            local old_x, old_y = term.getCursorPos()
-            term.setCursorPos(1, term.getCursorPos())
-            term.clearLine()
-            print("WebSocket connection closed. Code: " .. tostring(code) .. ", Reason: " .. tostring(reason))
-            ws = nil
-            term.write("Type in your prompt! > ")
-            term.setCursorPos(old_x, old_y)
-        end
+    ws.onClose = function(code, reason)
+        local old_x, old_y = term.getCursorPos()
+        term.setCursorPos(1, term.getCursorPos())
+        term.clearLine()
+        print("WebSocket connection closed. Code: " .. tostring(code) .. ", Reason: " .. tostring(reason))
+        ws = nil
+        term.write("Type in your prompt! > ")
+        term.setCursorPos(old_x, old_y)
+    end
 
-        ws.onError = function(error_message)
-            local old_x, old_y = term.getCursorPos()
-            term.setCursorPos(1, term.getCursorPos())
-            term.clearLine()
-            print("WebSocket error: " .. tostring(error_message))
-            ws = nil
-            term.write("Type in your prompt! > ")
-            term.setCursorPos(old_x, old_y)
-        end
+    ws.onError = function(error_message)
+        local old_x, old_y = term.getCursorPos()
+        term.setCursorPos(1, term.getCursorPos())
+        term.clearLine()
+        print("WebSocket error: " .. tostring(error_message))
+        ws = nil
+        term.write("Type in your prompt! > ")
+        term.setCursorPos(old_x, old_y)
+    end
 end
 
 if not ws then
@@ -246,21 +274,48 @@ local function send_command_to_model(user_command)
         print("Model > (No displayable response)")
     end
 
-    if response_data.action_details and type(response_data.action_details) == "table" then
-        local ad = response_data.action_details
-        if ad.action and ad.device and ad.room then
-            local config_key = ad.device:lower() .. "_" .. ad.room:lower()
-            local target_peripheral_id = peripheral_config[config_key]
-            if target_peripheral_id then
-                local rednet_success, rednet_err = rednet.send(target_peripheral_id, ad.action)
-                if not rednet_success then
-                    print("Failed to send rednet command: " .. (rednet_err or "unknown error"))
+    if response_data.action_details then
+        if type(response_data.action_details) == "table" then
+            if response_data.action_details.commands then
+                local sequence_data = response_data.action_details
+                local repeat_count = sequence_data["repeat"] == "infinite" and 1000 or sequence_data["repeat"]
+                local delay_ms = sequence_data.delay_ms or 0
+                for i = 1, repeat_count do
+                    for _, cmd in ipairs(sequence_data.commands) do
+                        if type(cmd) == "table" and cmd.action and cmd.device and cmd.room then
+                            local config_key = cmd.device:lower() .. "_" .. cmd.room:lower()
+                            local target_peripheral_id = peripheral_config[config_key]
+                            if target_peripheral_id then
+                                print("Executing action '" .. cmd.action .. "' on peripheral ID " .. target_peripheral_id .. " for " .. cmd.device .. " (" .. cmd.room .. ").")
+                                rednet.send(target_peripheral_id, cmd.action)
+                            else
+                                print("Error: No peripheral configured for " .. cmd.device .. " (" .. cmd.room .. ") with key: '" .. config_key .. "'.")
+                            end
+                        else
+                            print("Invalid command in sequence: " .. textutils.serialize(cmd))
+                        end
+                    end
+                    if i < repeat_count and delay_ms > 0 then
+                        sleep(delay_ms / 1000)
+                    end
+                end
+            elseif response_data.action_details.action and response_data.action_details.device and response_data.action_details.room then
+                local ad = response_data.action_details
+                local config_key = ad.device:lower() .. "_" .. ad.room:lower()
+                local target_peripheral_id = peripheral_config[config_key]
+                if target_peripheral_id then
+                    local rednet_success, rednet_err = rednet.send(target_peripheral_id, ad.action)
+                    if not rednet_success then
+                        print("Failed to send rednet command: " .. (rednet_err or "unknown error"))
+                    end
+                else
+                    print("Error: No peripheral configured for " .. ad.device .. " (" .. ad.room .. ") with key: '" .. config_key .. "'.")
                 end
             else
-                print("Error: No peripheral configured for " .. ad.device .. " (" .. ad.room .. ") with key: '" .. config_key .. "'.")
+                print("Unrecognized action_details structure.")
             end
         else
-            print("Model response included action_details, but some fields were missing.")
+            print("action_details is not a table.")
         end
     end
     if response_data.error then
@@ -283,10 +338,10 @@ print("==========================================")
 while true do
     term.write("Type in your prompt! > ")
     local input = read()
-        if not input then
-            print("\nInput stream closed. Exiting.")
-            break
-        end
+    if not input then
+        print("\nInput stream closed. Exiting.")
+        break
+    end
     if input:upper() == "EXIT" then
         break
     elseif input:match("^%s*$") then
@@ -298,4 +353,4 @@ end
 if ws then
     ws.close()
 end
-print("\nScript finished.")
+print("\nAdiós! Happy to be of service!")
