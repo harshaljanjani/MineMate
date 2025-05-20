@@ -10,13 +10,22 @@ processes commands, a NestJS server enables MQTT brokerage over WebSockets/HTTP,
 ## Requirements
 
 * Python 3.7
-* Node.js (recommended version is LTS)
+* FastAPI
+* Uvicorn
+* Node.js (LTS version recommended)
 * npm
 * NestJS
 * Pydantic
-* Minecraft Java Edition with Tekkit: The Resurrection/ComputerCraft (CC: Tweaked) modification
-* Google AI Studio API Key (as `GEMMA_API_KEY` environment variable)
+* Minecraft Java Edition with the Tekkit: The Resurrection / ComputerCraft (CC: Tweaked) modification
+* Google AI Studio API Key (set as the `GEMMA_API_KEY` environment variable)
 * Git
+* Lua - Required for in-game ComputerCraft computers (no installation needed outside Minecraft, but knowledge is essential)
+* TypeScript - Automatically installed via NestJS or can be added manually with `npm install --save-dev typescript`
+* Google GenAI SDK (install via `pip install google-genai`)
+
+## Demo Setup Blueprint (Top-View for Reproducibility)
+
+![Demo Setup Blueprint (Top-View for Reproducibility)](https://github.com/user-attachments/assets/98915ce6-3bb5-43c4-bb68-c65d96bfa965)
 
 ## Overview
 
